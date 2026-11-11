@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="initial-scale=1,user-scalable=no,maximum-scale=1,width=device-width">
+        <meta name="mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <link rel="stylesheet" href="css/leaflet.css">
+        <link rel="stylesheet" href="css/L.Control.Layers.Tree.css">
+        <link rel="stylesheet" href="css/qgis2web.css">
+        <link rel="stylesheet" href="css/fontawesome-all.min.css">
+        <link rel="stylesheet" href="css/leaflet.photon.css">
+        <style>
+        html, body { height: 100%; width: 100%; margin: 0; padding: 0; }
+        #map { width: 100%; height: 100vh; }
+        .gps-panel {
+            position: absolute; z-index: 1000; top: 12px; right: 12px;
+            background: rgba(255,255,255,.96); padding: 10px 12px;
+            border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,.25);
+            font-family: Tahoma, Arial, sans-serif; direction: rtl;
+            min-width: 190px; max-width: calc(100vw - 48px);
+        }
+        .gps-panel button {
+            border: 0; border-radius: 7px; padding: 9px 12px; margin: 2px;
+            font: bold 13px Tahoma, Arial, sans-serif; cursor: pointer;
+            background: #1976d2; color: white;
+        }
+        .gps-panel button.stop { background: #c62828; }
+        .gps-status { font-size: 12px; line-height: 1.8; margin-top: 5px; color: #222; }
+        .gps-dot { width: 16px; height: 16px; border-radius: 50%; background: #1688ff;
+            border: 3px solid white; box-shadow: 0 0 0 2px #075db5, 0 1px 6px #333; }
+        .field-panel { position:absolute; z-index:1001; top:12px; left:12px; direction:rtl; font:13px Tahoma,Arial,sans-serif; background:rgba(255,255,255,.96); padding:10px; border-radius:10px; box-shadow:0 2px 10px #0003; max-width:calc(100vw - 24px); }
+        .field-panel button { border:0; border-radius:7px; padding:8px 10px; margin:2px; color:#fff; background:#455a64; font:bold 12px Tahoma,Arial,sans-serif; cursor:pointer; }
+        .field-panel button.primary { background:#1565c0; } .field-panel button.warn { background:#c62828; }
+        .field-status { margin-top:5px; line-height:1.8; font-size:12px; color:#222; }
+        .compass { position:absolute; z-index:1000; bottom:24px; left:12px; width:48px; height:48px; border-radius:50%; background:#fffE; box-shadow:0 1px 7px #0005; display:flex; align-items:center; justify-content:center; font:bold 25px Tahoma; color:#c62828; }
+        .compass span { display:inline-block; transform-origin:50% 50%; }
+        .start-point { background:#d32f2f; border:2px solid white; border-radius:50%; width:15px; height:15px; box-shadow:0 0 0 2px #b71c1c; }
+        .active-block { color:#111!important; weight:3; fillColor:#ffb300!important; fillOpacity:.45!important; }
+        .route-info { font-size:12px; line-height:1.7; margin-top:4px; }
+        @media (max-width: 600px) { .field-panel {top:auto;bottom:10px;left:8px;right:8px;padding:7px;} .field-panel button {padding:8px 7px;font-size:11px;} .gps-panel {top:8px;right:8px;min-width:150px;} .compass {bottom:150px;left:10px;width:42px;height:42px;} }
+        @media (max-width: 600px) {
+            .gps-panel { top: 8px; right: 8px; padding: 8px; min-width: 165px; }
+            .gps-panel button { padding: 8px 9px; font-size: 12px; }
+        }
+        </style>
+        <title>نقشه میدانی سرشماری - حوزه 4175</title>
+    </head>
+    <body>
+        <div id="map"></div>
+        <div class="gps-panel">
+            <button id="gpsStart" type="button">ثبت موقعیت زنده GPS</button>
+            <button id="gpsStop" class="stop" type="button" style="display:none">توقف ردیابی</button>
+            <div id="gpsStatus" class="gps-status">وضعیت: GPS غیرفعال است</div>
+        </div>
+        <div class="field-panel">
+            <div><button id="firstBlock" class="primary">بلوک اول</button><button id="nextBlock" class="primary">بلوک بعدی</button><button id="zoomBlock">نمایش بلوک فعال</button></div>
+            <div><button id="carRoute">مسیریابی خودرو</button><button id="footRoute">مسیریابی پیاده</button><button id="clearRoute" class="warn">پاک‌کردن مسیر</button></div>
+            <div><button id="cancelBlock" class="warn">لغو بلوک فعال</button><button id="followGps">رفتن به موقعیت من</button></div>
+            <div id="fieldStatus" class="field-status">بلوک‌ها در حال آماده‌سازی…</div><div id="routeInfo" class="route-info"></div>
+        </div>
+        <div class="compass" title="قطب‌نما"><span id="compassNeedle">▲</span></div>
+        <script src="js/qgis2web_expressions.js"></script>
+        <script src="js/leaflet.js"></script>
+        <script src="js/L.Control.Layers.Tree.min.js"></script>
+        <script src="js/leaflet.rotatedMarker.js"></script>
+        <script src="js/leaflet.pattern.js"></script>
+        <script src="js/leaflet-hash.js"></script>
+        <script src="js/Autolinker.min.js"></script>
+        <script src="js/rbush.min.js"></script>
+        <script src="js/labelgun.min.js"></script>
+        <script src="js/labels.js"></script>
+        <script src="js/leaflet.photon.js"></script>
+        <script src="data/Blk1405_4175_1.js"></script>
+        <script>
+        var map = L.map('map', {
+            zoomControl:false, maxZoom:28, minZoom:1
+        }).fitBounds([[30.092558965614135,54.371679932542165],[30.1171052826835,54.414437699704756]]);
+        var hash = new L.Hash(map);
+        map.attributionControl.setPrefix('<a href="https://github.com/qgis2web/qgis2web" target="_blank">qgis2web</a> &middot; <a href="https://leafletjs.com" title="A JS library for interactive maps">Leaflet</a> &middot; <a href="https://qgis.org">QGIS</a>');
+        var autolinker = new Autolinker({truncate: {length: 30, location: 'smart'}});
+        // remove popup's row if "visible-with-data"
+        function removeEmptyRowsFromPopupContent(content, feature) {
+         var tempDiv = document.createElement('div');
+         tempDiv.innerHTML = content;
+         var rows = tempDiv.querySelectorAll('tr');
+         for (var i = 0; i < rows.length; i++) {
+             var td = rows[i].querySelector('td.visible-with-data');
+             var key = td ? td.id : '';
+             if (td && td.classList.contains('visible-with-data') && feature.properties[key] == null) {
+                 rows[i].parentNode.removeChild(rows[i]);
+             }
+         }
+         return tempDiv.innerHTML;
+        }
+        // modify popup if contains media
+        function addClassToPopupIfMedia(content, popup) {
+            var tempDiv = document.createElement('div');
+            tempDiv.innerHTML = content;
+            var imgTd = tempDiv.querySelector('td img');
+            if (imgTd) {
+                var src = imgTd.getAttribute('src');
+                if (/\.(jpg|jpeg|png|gif|bmp|webp|avif)$/i.test(src)) {
+                    popup._contentNode.classList.add('media');
+                    var img = popup._contentNode.querySelector('td img');
+                    if (img) {
+                        // If already loaded (cache), update immediately
+                        if (img.complete && img.naturalHeight > 0) {
+                            popup.update();
+                        } else {
+                            img.addEventListener('load', function() {
+                                popup.update();
+                            });
+                            img.addEventListener('error', function() {
+                                popup.update();
+                            });
+                        }
+                    }
+                } else if (/\.(mp3|wav|ogg|aac)$/i.test(src)) {
+                    var audio = document.createElement('audio');
+                    audio.controls = true;
+                    audio.src = src;
+                    imgTd.parentNode.replaceChild(audio, imgTd);
+                    popup._contentNode.classList.add('media');
+                    setTimeout(function() {
+                        popup.setContent(tempDiv.innerHTML);
+                        popup.update();
+                    }, 10);
+                } else if (/\.(mp4|webm|ogg|mov)$/i.test(src)) {
+                    var video = document.createElement('video');
+                    video.controls = true;
+                    video.src = src;
+                    video.style.width = "400px";
+                    video.style.height = "300px";
+                    video.style.maxHeight = "60vh";
+                    video.style.maxWidth = "60vw";
+                    imgTd.parentNode.replaceChild(video, imgTd);
+                    popup._contentNode.classList.add('media');
+                    // Aggiorna il popup quando il video carica i metadati
+                    video.addEventListener('loadedmetadata', function() {
+                        popup.update();
+                    });
+                    setTimeout(function() {
+                        popup.setContent(tempDiv.innerHTML);
+                        popup.update();
+                    }, 10);
+                } else {
+                    popup._contentNode.classList.remove('media');
+                }
+            } else {
+                popup._contentNode.classList.remove('media');
+            }
+        }
+        var zoomControl = L.control.zoom({
+            position: 'topleft'
+        }).addTo(map);
+        var bounds_group = new L.featureGroup([]);
+        function setBounds() {
+        }
+        map.createPane('pane_Satelliteonly_0');
+        map.getPane('pane_Satelliteonly_0').style.zIndex = 400;
+        var layer_Satelliteonly_0 = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+            pane: 'pane_Satelliteonly_0',
+            opacity: 1.0,
+            attribution: '',
+            minZoom: 1,
+            maxZoom: 28,
+            minNativeZoom: 0,
+            maxNativeZoom: 18
+        });
+        layer_Satelliteonly_0;
+        map.addLayer(layer_Satelliteonly_0);
+        function pop_Blk1405_4175_1(feature, layer) {
+            var popupContent = '<table>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['Adres1381'] !== null ? autolinker.link(String(feature.properties['Adres1381']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['Adres1385'] !== null ? autolinker.link(String(feature.properties['Adres1385']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['Adres1390'] !== null ? autolinker.link(String(feature.properties['Adres1390']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['ADRES1395'] !== null ? autolinker.link(String(feature.properties['ADRES1395']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['Adres1404'] !== null ? autolinker.link(String(feature.properties['Adres1404']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['Taghir1405'] !== null ? autolinker.link(String(feature.properties['Taghir1405']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['hh1395'] !== null ? autolinker.link(String(feature.properties['hh1395']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['hh1405'] !== null ? autolinker.link(String(feature.properties['hh1405']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['sinavalue'] !== null ? autolinker.link(String(feature.properties['sinavalue']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['VALUE'] !== null ? autolinker.link(String(feature.properties['VALUE']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['HOZE1405'] !== null ? autolinker.link(String(feature.properties['HOZE1405']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['HOZE_M1405'] !== null ? autolinker.link(String(feature.properties['HOZE_M1405']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['BLK_NO1405'] !== null ? autolinker.link(String(feature.properties['BLK_NO1405']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['GEOCODE'] !== null ? autolinker.link(String(feature.properties['GEOCODE']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['ADRES1405'] !== null ? autolinker.link(String(feature.properties['ADRES1405']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['Khn1395'] !== null ? autolinker.link(String(feature.properties['Khn1395']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['BKhn1405'] !== null ? autolinker.link(String(feature.properties['BKhn1405']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['ADRES1393'] !== null ? autolinker.link(String(feature.properties['ADRES1393']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['Abadi_Code'] !== null ? autolinker.link(String(feature.properties['Abadi_Code']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['DIAG'] !== null ? autolinker.link(String(feature.properties['DIAG']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['Name'] !== null ? autolinker.link(String(feature.properties['Name']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                </table>';
+            var content = removeEmptyRowsFromPopupContent(popupContent, feature);
+			layer.on('popupopen', function(e) {
+				addClassToPopupIfMedia(content, e.popup);
+			});
+			layer.bindPopup(content, { maxHeight: 400 });
+        }
+
+        function style_Blk1405_4175_1_0() {
+            return {
+                pane: 'pane_Blk1405_4175_1',
+                opacity: 1,
+                color: 'rgba(35,35,35,1.0)',
+                dashArray: '',
+                lineCap: 'square',
+                lineJoin: 'bevel',
+                weight: 1.0,
+                fillOpacity: 0,
+                interactive: true,
+            }
+        }
+        map.createPane('pane_Blk1405_4175_1');
+        map.getPane('pane_Blk1405_4175_1').style.zIndex = 401;
+        map.getPane('pane_Blk1405_4175_1').style['mix-blend-mode'] = 'normal';
+        var layer_Blk1405_4175_1 = new L.geoJson(json_Blk1405_4175_1, {
+            attribution: '',
+            interactive: true,
+            dataVar: 'json_Blk1405_4175_1',
+            layerName: 'layer_Blk1405_4175_1',
+            pane: 'pane_Blk1405_4175_1',
+            onEachFeature: pop_Blk1405_4175_1,
+            style: style_Blk1405_4175_1_0,
+        });
+        bounds_group.addLayer(layer_Blk1405_4175_1);
+        map.addLayer(layer_Blk1405_4175_1);
+        setBounds();
+        var i = 0;
+        layer_Blk1405_4175_1.eachLayer(function(layer) {
+            var context = {
+                feature: layer.feature,
+                variables: {}
+            };
+            layer.bindTooltip((layer.feature.properties['BLK_NO1405'] !== null?String('<div style="color: #323232; font-size: 10pt; font-family: \'Open Sans\', sans-serif;">' + layer.feature.properties['BLK_NO1405']).replace(/\\n/g, '<br>') + '</div>':''), {permanent: true, offset: [-0, -16], className: 'css_Blk1405_4175_1'});
+            labels.push(layer);
+            totalMarkers += 1;
+              layer.added = true;
+              addLabel(layer, i);
+              i++;
+        });
+        resetLabels([layer_Blk1405_4175_1]);
+        map.on("zoomend", function(){
+            resetLabels([layer_Blk1405_4175_1]);
+        });
+        map.on("layeradd", function(){
+            resetLabels([layer_Blk1405_4175_1]);
+        });
+        map.on("layerremove", function(){
+            resetLabels([layer_Blk1405_4175_1]);
+        });
+
+        // ردیابی زنده GPS: با watchPosition موقعیت کاربر به طور پیوسته به‌روز می‌شود.
+        var gpsWatchId = null;
+        var gpsMarker = null;
+        var gpsAccuracyCircle = null;
+        var gpsFirstFix = true;
+        var gpsStatusEl = document.getElementById('gpsStatus');
+        var gpsStartBtn = document.getElementById('gpsStart');
+        var gpsStopBtn = document.getElementById('gpsStop');
+        var gpsIcon = L.divIcon({className: '', html: '<div class="gps-dot"></div>', iconSize: [22,22], iconAnchor: [11,11]});
+
+        function stopLiveGPS() {
+            if (gpsWatchId !== null && navigator.geolocation) {
+                navigator.geolocation.clearWatch(gpsWatchId);
+                gpsWatchId = null;
+            }
+            gpsStartBtn.style.display = '';
+            gpsStopBtn.style.display = 'none';
+            gpsStatusEl.textContent = gpsMarker ? 'وضعیت: ردیابی متوقف شد' : 'وضعیت: GPS غیرفعال است';
+        }
+
+        gpsStartBtn.addEventListener('click', function() {
+            if (!('geolocation' in navigator)) {
+                gpsStatusEl.textContent = 'این مرورگر از GPS پشتیبانی نمی‌کند.';
+                return;
+            }
+            if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+                gpsStatusEl.textContent = 'برای GPS زنده، نقشه را از طریق HTTPS اجرا کنید.';
+                return;
+            }
+            if (gpsWatchId !== null) return;
+            gpsFirstFix = true;
+            gpsStatusEl.textContent = 'در حال دریافت موقعیت GPS…';
+            gpsStartBtn.style.display = 'none';
+            gpsStopBtn.style.display = '';
+            gpsWatchId = navigator.geolocation.watchPosition(function(position) {
+                var lat = position.coords.latitude;
+                var lng = position.coords.longitude;
+                var accuracy = position.coords.accuracy || 0;
+                var current = L.latLng(lat, lng);
+                if (!gpsMarker) {
+                    gpsMarker = L.marker(current, {icon: gpsIcon, title: 'موقعیت زنده شما', zIndexOffset: 1000}).addTo(map);
+                    gpsMarker.bindPopup('موقعیت فعلی شما');
+                } else {
+                    gpsMarker.setLatLng(current);
+                }
+                if (!gpsAccuracyCircle) {
+                    gpsAccuracyCircle = L.circle(current, {radius: accuracy, color: '#1688ff', weight: 1, fillColor: '#1688ff', fillOpacity: 0.12}).addTo(map);
+                } else {
+                    gpsAccuracyCircle.setLatLng(current);
+                    gpsAccuracyCircle.setRadius(accuracy);
+                }
+                if (gpsFirstFix) {
+                    map.setView(current, Math.max(map.getZoom(), 17));
+                    gpsFirstFix = false;
+                } else {
+                    map.panTo(current, {animate: true, duration: 0.4});
+                }
+                gpsStatusEl.textContent = 'GPS فعال | دقت تقریبی: ' + Math.round(accuracy) + ' متر';
+            }, function(error) {
+                var message = 'خطا در دریافت موقعیت GPS';
+                if (error.code === 1) message = 'دسترسی مکان‌یابی رد شده است؛ مجوز GPS مرورگر را فعال کنید.';
+                else if (error.code === 2) message = 'موقعیت فعلاً در دسترس نیست؛ GPS دستگاه را بررسی کنید.';
+                else if (error.code === 3) message = 'زمان دریافت موقعیت به پایان رسید؛ دوباره تلاش کنید.';
+                gpsStatusEl.textContent = message;
+                stopLiveGPS();
+            }, {enableHighAccuracy: true, maximumAge: 1000, timeout: 20000});
+        });
+        gpsStopBtn.addEventListener('click', stopLiveGPS);
+
+        window.addEventListener('pagehide', stopLiveGPS);
+
+        // ابزارهای میدانی بلوک‌ها
+        var fieldStatus = document.getElementById('fieldStatus');
+        var routeInfo = document.getElementById('routeInfo');
+        var blockLayers = [];
+        layer_Blk1405_4175_1.eachLayer(function(layer) {
+            var raw = layer.feature && layer.feature.properties ? layer.feature.properties.BLK_NO1405 : null;
+            var num = parseInt(String(raw == null ? '' : raw).replace(/\D/g,''), 10);
+            if (Number.isFinite(num)) blockLayers.push({layer:layer, number:num});
+        });
+        blockLayers.sort(function(a,b){ return a.number-b.number; });
+        var activeBlockIndex = -1, activeBlock = null, routeLayer = null, routeTarget = null;
+        function setFieldStatus(extra) {
+            var base = activeBlock ? ('بلوک فعال: ' + activeBlock.number + ' | ' + (activeBlockIndex+1) + ' از ' + blockLayers.length) : ('تعداد بلوک‌ها: ' + blockLayers.length + ' | بلوکی انتخاب نشده');
+            fieldStatus.textContent = base + (extra ? ' | ' + extra : '');
+        }
+        function clearActiveBlock() {
+            if (activeBlock) activeBlock.layer.setStyle({color:'rgba(35,35,35,1.0)',weight:1,fillOpacity:0});
+            activeBlock = null; activeBlockIndex = -1; setFieldStatus('انتخاب لغو شد');
+        }
+        function activateBlock(index) {
+            if (!blockLayers.length) { setFieldStatus('لایه بلوک خالی است'); return; }
+            index = Math.max(0, Math.min(index, blockLayers.length-1));
+            if (activeBlock) activeBlock.layer.setStyle({color:'rgba(35,35,35,1.0)',weight:1,fillOpacity:0});
+            activeBlockIndex = index; activeBlock = blockLayers[index];
+            activeBlock.layer.setStyle({color:'#ff6f00',weight:3,fillColor:'#ffca28',fillOpacity:.38});
+            activeBlock.layer.bringToFront();
+            setFieldStatus('بلوک انتخاب شد');
+        }
+        function zoomActiveBlock() {
+            if (!activeBlock) { setFieldStatus('ابتدا یک بلوک انتخاب کنید'); return; }
+            var b = activeBlock.layer.getBounds(); if (b && b.isValid()) map.fitBounds(b.pad(.25), {maxZoom:19});
+        }
+        document.getElementById('firstBlock').addEventListener('click', function(){activateBlock(0);zoomActiveBlock();});
+        document.getElementById('nextBlock').addEventListener('click', function(){activateBlock(activeBlockIndex < 0 ? 0 : Math.min(activeBlockIndex+1,blockLayers.length-1));zoomActiveBlock();});
+        document.getElementById('zoomBlock').addEventListener('click', zoomActiveBlock);
+        document.getElementById('cancelBlock').addEventListener('click', clearActiveBlock);
+        document.getElementById('followGps').addEventListener('click', function(){ if(gpsMarker){map.setView(gpsMarker.getLatLng(),Math.max(map.getZoom(),17));}else{gpsStartBtn.click();} });
+        setFieldStatus();
+
+        // نقطه شروع تقریبی: جنوبی‌ترین رأس و سپس غربی‌ترین رأس در همان عرض جغرافیایی
+        var southWestVertex = null;
+        layer_Blk1405_4175_1.eachLayer(function(layer){
+            function scan(coords){ if(!Array.isArray(coords)) return; if(typeof coords[0]==='number' && typeof coords[1]==='number'){
+                var ll=L.latLng(coords[1],coords[0]);
+                if(!southWestVertex || ll.lat < southWestVertex.lat-1e-10 || (Math.abs(ll.lat-southWestVertex.lat)<1e-10 && ll.lng<southWestVertex.lng)) southWestVertex=ll;
+            } else coords.forEach(scan); }
+            if(layer.feature && layer.feature.geometry) scan(layer.feature.geometry.coordinates);
+        });
+        if(southWestVertex){
+            L.marker(southWestVertex,{icon:L.divIcon({className:'',html:'<div class="start-point"></div>',iconSize:[19,19],iconAnchor:[9,9]}),title:'نقطه شروع تقریبی جنوب‌غربی'}).addTo(map).bindPopup('نقطه شروع تقریبی جنوب‌غربی حوزه');
+        }
+
+        // مسیریابی از GPS فعلی به مرکز بلوک انتخاب‌شده یا مقصدی که روی نقشه انتخاب شود
+        map.on('click',function(e){ routeTarget=e.latlng; routeInfo.textContent='مقصد مسیر انتخاب شد؛ برای مسیریابی خودرو یا پیاده بزنید.'; });
+        function drawRoute(profile){
+            if(!gpsMarker){routeInfo.textContent='ابتدا ثبت موقعیت زنده GPS را فعال کنید.';return;}
+            var target=routeTarget || (activeBlock ? activeBlock.layer.getBounds().getCenter() : null);
+            if(!target){routeInfo.textContent='یک بلوک انتخاب کنید یا مقصد را روی نقشه لمس کنید.';return;}
+            var start=gpsMarker.getLatLng();
+            var url='https://router.project-osrm.org/route/v1/'+profile+'/'+start.lng+','+start.lat+';'+target.lng+','+target.lat+'?overview=full&geometries=geojson';
+            routeInfo.textContent='در حال محاسبه مسیر…';
+            fetch(url).then(function(r){if(!r.ok)throw new Error('خطای سرویس مسیر');return r.json();}).then(function(data){
+                if(!data.routes || !data.routes.length) throw new Error('مسیری پیدا نشد');
+                if(routeLayer) map.removeLayer(routeLayer);
+                var r=data.routes[0]; routeLayer=L.geoJSON(r.geometry,{style:{color:profile==='driving'?'#1565c0':'#2e7d32',weight:5,opacity:.85}}).addTo(map);
+                map.fitBounds(routeLayer.getBounds().pad(.15));
+                var km=(r.distance/1000).toFixed(2), mins=Math.round(r.duration/60);
+                routeInfo.textContent='مسافت: '+km+' کیلومتر | زمان تخمینی: '+mins+' دقیقه (بدون تضمین ترافیک زنده)';
+            }).catch(function(err){routeInfo.textContent='مسیریابی انجام نشد: '+err.message+'؛ اتصال اینترنت یا سرویس مسیر را بررسی کنید.';});
+        }
+        document.getElementById('carRoute').addEventListener('click',function(){drawRoute('driving');});
+        document.getElementById('footRoute').addEventListener('click',function(){drawRoute('walking');});
+        document.getElementById('clearRoute').addEventListener('click',function(){if(routeLayer)map.removeLayer(routeLayer);routeLayer=null;routeTarget=null;routeInfo.textContent='مسیر پاک شد.';});
+
+        // قطب‌نمای دستگاه؛ پشتیبانی و مجوز آن وابسته به مرورگر است
+        function handleOrientation(e){ var heading = (typeof e.webkitCompassHeading==='number') ? e.webkitCompassHeading : (typeof e.alpha==='number' ? 360-e.alpha : null); if(heading!==null) document.getElementById('compassNeedle').style.transform='rotate('+heading+'deg)'; }
+        if(window.DeviceOrientationEvent){ window.addEventListener('deviceorientation',handleOrientation,true); }
+        document.getElementById('compassNeedle').parentElement.addEventListener('click',function(){
+            if(typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function'){
+                DeviceOrientationEvent.requestPermission().then(function(state){if(state==='granted')window.addEventListener('deviceorientation',handleOrientation,true);}).catch(function(){});
+            }
+        });
+        
+        </script>
+    </body>
+</html>
